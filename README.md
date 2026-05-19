@@ -7,32 +7,35 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue?logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 
-Serviço de notificações orientado a eventos construído com Java 17 + Spring Boot 3.5 e **Apache Kafka**. Consome eventos publicados pelo `order-processing-api`, processa e persiste notificações no PostgreSQL com suporte a **Dead Letter Queue** para tratamento de falhas.
+Event-driven notification service built with Java 17 + Spring Boot 3.5 and
+**Apache Kafka**. It consumes events published by `order-processing-api`,
+processes them and persists notifications in PostgreSQL, with **Dead Letter
+Queue** support for failure handling.
 
-## Links rápidos
+## Quick links
 
 | | |
 |---|---|
-| Simular pedido criado | `POST http://localhost:8080/api/v1/simulate/order-placed` |
-| Simular pedido cancelado | `POST http://localhost:8080/api/v1/simulate/order-cancelled` |
-| Listar notificações | `GET http://localhost:8080/api/v1/notifications` |
-| Notificações por pedido | `GET http://localhost:8080/api/v1/notifications/order/{orderId}` |
-| Rodar com Docker | [Ir para seção](#execução) |
+| Simulate order placed | `POST http://localhost:8080/api/v1/simulate/order-placed` |
+| Simulate order cancelled | `POST http://localhost:8080/api/v1/simulate/order-cancelled` |
+| List notifications | `GET http://localhost:8080/api/v1/notifications` |
+| Notifications by order | `GET http://localhost:8080/api/v1/notifications/order/{orderId}` |
+| Run with Docker | [Go to section](#running) |
 
-## Principais competências demonstradas
+## Key skills demonstrated
 
-- Arquitetura orientada a eventos com Apache Kafka (producer e consumer)
-- KRaft mode — Kafka sem ZooKeeper (padrão desde Kafka 3.3)
-- Dead Letter Queue (DLQ): mensagens que falham 3x são redirecionadas para tópico separado
-- Consumer groups para processamento distribuído
-- Clean Architecture aplicada: domínio isolado de Kafka, JPA e Spring
-- Persistência de eventos como notificações com Spring Data JPA e PostgreSQL
-- Retry automático com backoff fixo via `DefaultErrorHandler`
-- Containerização com Docker Compose (Kafka + PostgreSQL)
+- Event-driven architecture with Apache Kafka (producer and consumer)
+- KRaft mode — Kafka without ZooKeeper (default since Kafka 3.3)
+- Dead Letter Queue (DLQ): messages that fail 3 times are redirected to a separate topic
+- Consumer groups for distributed processing
+- Clean Architecture applied: domain isolated from Kafka, JPA and Spring
+- Persisting events as notifications with Spring Data JPA and PostgreSQL
+- Automatic retry with fixed backoff via `DefaultErrorHandler`
+- Containerization with Docker Compose (Kafka + PostgreSQL)
 
-## Tecnologias
+## Tech stack
 
-| Tecnologia | Versão |
+| Technology | Version |
 |---|---|
 | Java | 17 |
 | Spring Boot | 3.5.13 |
@@ -42,142 +45,154 @@ Serviço de notificações orientado a eventos construído com Java 17 + Spring 
 | PostgreSQL | 16 |
 | Docker + Docker Compose | — |
 
-## Fluxo de um evento
+## Event flow
 
 ```
 1. POST /simulate/order-placed     →  OrderEventProducer
-2. OrderEventProducer              →  publica OrderPlacedEvent no tópico order-placed-events
-3. OrderEventConsumer              →  @KafkaListener consome o evento
-4. ProcessOrderEventUseCase        →  cria Notification, persiste com status SENT
-5. NotificationRepositoryImpl      →  salva via JPA no PostgreSQL
-6. GET /notifications              →  retorna notificações salvas
+2. OrderEventProducer              →  publishes OrderPlacedEvent to the order-placed-events topic
+3. OrderEventConsumer              →  @KafkaListener consumes the event
+4. ProcessOrderEventUseCase        →  creates a Notification, persists it with status SENT
+5. NotificationRepositoryImpl      →  saves it via JPA to PostgreSQL
+6. GET /notifications              →  returns the saved notifications
 ```
 
-Em caso de falha no consumer, o `DefaultErrorHandler` tenta 3x com intervalo de 2 segundos. Após o terceiro erro, a mensagem é publicada no tópico `.DLT` e o `DLQConsumer` a recebe para tratamento.
+If the consumer fails, `DefaultErrorHandler` retries 3 times with a 2-second
+interval. After the third error, the message is published to the `.DLT` topic
+and `DLQConsumer` receives it for handling.
 
-## Arquitetura
+## Architecture
 
 ```
 src/main/java/com/lnl/notification/
-├── domain/                        → Núcleo. Zero dependências externas.
+├── domain/                        → Core. Zero external dependencies.
 │   ├── entity/                    │   Notification
 │   ├── enums/                     │   NotificationType, NotificationStatus
-│   └── repository/                │   NotificationRepository (interface — porta de saída)
+│   └── repository/                │   NotificationRepository (interface — outbound port)
 │
-├── application/                   → Casos de uso. Orquestra o domínio.
-│   └── usecase/                   │   ProcessOrderEventUseCase (POJO puro, sem @Service)
+├── application/                   → Use cases. Orchestrates the domain.
+│   └── usecase/                   │   ProcessOrderEventUseCase (plain POJO, no @Service)
 │
-├── adapters/                      → Tradutores entre domínio e mundo externo
+├── adapters/                      → Translators between domain and the outside world
 │   ├── kafka/
 │   │   ├── consumer/              │   OrderEventConsumer, DLQConsumer
-│   │   ├── producer/              │   OrderEventProducer (simula o order-processing-api)
-│   │   └── event/                 │   OrderPlacedEvent, OrderCancelledEvent (DTOs Kafka)
+│   │   ├── producer/              │   OrderEventProducer (simulates order-processing-api)
+│   │   └── event/                 │   OrderPlacedEvent, OrderCancelledEvent (Kafka DTOs)
 │   ├── persistence/               │   NotificationEntity, NotificationRepositoryImpl
 │   └── controller/                │   NotificationController, SimulateOrderRequest
 │
-└── infrastructure/                → Configuração e tratamento de erros
-    ├── config/                    │   KafkaConfig (tópicos, DLQ, error handler), BeanConfig
+└── infrastructure/                → Configuration and error handling
+    ├── config/                    │   KafkaConfig (topics, DLQ, error handler), BeanConfig
     └── exception/                 │   GlobalExceptionHandler
 ```
 
-## Tópicos Kafka
+## Kafka topics
 
-| Tópico | Tipo | Descrição |
+| Topic | Type | Description |
 |---|---|---|
-| `order-placed-events` | Principal | Eventos de pedido criado |
-| `order-placed-events.DLT` | Dead Letter | Mensagens que falharam 3x |
-| `order-cancelled-events` | Principal | Eventos de pedido cancelado |
-| `order-cancelled-events.DLT` | Dead Letter | Mensagens que falharam 3x |
+| `order-placed-events` | Main | Order placed events |
+| `order-placed-events.DLT` | Dead Letter | Messages that failed 3 times |
+| `order-cancelled-events` | Main | Order cancelled events |
+| `order-cancelled-events.DLT` | Dead Letter | Messages that failed 3 times |
 
-Os tópicos são criados automaticamente pela aplicação via `TopicBuilder` ao subir.
+Topics are created automatically by the application via `TopicBuilder` on startup.
 
-## Pré-requisitos
+## Prerequisites
 
 - Java 17+
 - Maven 3.8+
 - Docker Desktop
 
-## Execução
+## Running
 
 ```bash
-# Sobe Kafka (KRaft) + PostgreSQL
+# Start Kafka (KRaft) + PostgreSQL
 docker-compose up -d
 
-# Sobe a aplicação
+# Start the application
 mvn spring-boot:run
 ```
 
-API disponível em `http://localhost:8080`.
+API available at `http://localhost:8080`.
 
-> **Nota:** o PostgreSQL usa a porta 5434 para não conflitar com outras instâncias locais.
+> **Note:** PostgreSQL uses port 5434 to avoid conflicts with other local instances.
 
 ## Endpoints
 
-### Simulação de eventos
+### Event simulation
 
-| Método | Rota | Descrição |
+| Method | Route | Description |
 |---|---|---|
-| `POST` | `/api/v1/simulate/order-placed` | Publica evento de pedido criado no Kafka |
-| `POST` | `/api/v1/simulate/order-cancelled` | Publica evento de pedido cancelado no Kafka |
+| `POST` | `/api/v1/simulate/order-placed` | Publishes an order-placed event to Kafka |
+| `POST` | `/api/v1/simulate/order-cancelled` | Publishes an order-cancelled event to Kafka |
 
-### Notificações
+### Notifications
 
-| Método | Rota | Descrição |
+| Method | Route | Description |
 |---|---|---|
-| `GET` | `/api/v1/notifications` | Lista todas as notificações |
-| `GET` | `/api/v1/notifications/order/{orderId}` | Notificações de um pedido específico |
+| `GET` | `/api/v1/notifications` | List all notifications |
+| `GET` | `/api/v1/notifications/order/{orderId}` | Notifications for a specific order |
 
-## Exemplos
+## Examples
 
-### Simular pedido criado
+### Simulate an order placed
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/simulate/order-placed \
   -H "Content-Type: application/json" \
-  -d '{"orderId": "ped-001", "customerId": "cliente-001"}'
+  -d '{"orderId": "ord-001", "customerId": "customer-001"}'
 ```
 
 ```
-Evento ORDER_PLACED publicado: ped-001
+ORDER_PLACED event published: ord-001
 ```
 
-### Consultar notificações do pedido
+### Query an order's notifications
 
 ```bash
-curl http://localhost:8080/api/v1/notifications/order/ped-001
+curl http://localhost:8080/api/v1/notifications/order/ord-001
 ```
 
 ```json
 [
   {
     "id": "6c575c36-32f6-4f59-95f1-d398a346eadb",
-    "orderId": "ped-001",
-    "customerId": "cliente-001",
+    "orderId": "ord-001",
+    "customerId": "customer-001",
     "type": "ORDER_PLACED",
-    "message": "Seu pedido ped-001 foi recebido e esta sendo processado.",
+    "message": "Your order ord-001 has been received and is being processed.",
     "status": "SENT",
     "createdAt": "2026-04-11T19:22:46"
   },
   {
     "id": "c46e4269-28e7-4658-ba02-dc1a05191b99",
-    "orderId": "ped-001",
-    "customerId": "cliente-001",
+    "orderId": "ord-001",
+    "customerId": "customer-001",
     "type": "ORDER_CANCELLED",
-    "message": "Seu pedido ped-001 foi cancelado.",
+    "message": "Your order ord-001 has been cancelled.",
     "status": "SENT",
     "createdAt": "2026-04-11T19:23:34"
   }
 ]
 ```
 
-## Considerações para produção
+## 🤖 Agent Architecture
 
-- Substituir `ddl-auto=update` por migrations com Flyway ou Liquibase
-- Adicionar Schema Registry (Confluent) para versionamento dos eventos com Avro
-- Implementar idempotência no consumer para evitar processamento duplicado
-- Monitorar lag de consumer groups com Kafka UI ou Prometheus + Grafana
-- Mover configurações sensíveis para variáveis de ambiente
+This project was built and code-reviewed using a **multi-agent
+context-optimization workflow**: specialized AI agents each audit a single
+architectural layer — domain, use cases, adapters, infrastructure, tests —
+within a strict context budget. The approach cuts review time and token cost
+while keeping full traceability of every finding.
 
-## Autor
+Methodology, agent templates and the full playbook: **[leonlim3.gumroad.com](https://leonlim3.gumroad.com)**
+
+## Production considerations
+
+- Replace `ddl-auto=update` with migrations using Flyway or Liquibase
+- Add a Schema Registry (Confluent) for event versioning with Avro
+- Implement consumer idempotency to avoid duplicate processing
+- Monitor consumer group lag with Kafka UI or Prometheus + Grafana
+- Move sensitive configuration to environment variables
+
+## Author
 
 LNL &nbsp; GitHub: [@leonlimask20-dot](https://github.com/leonlimask20-dot) &nbsp; Email: leonlimask@gmail.com
